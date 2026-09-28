@@ -1,9 +1,10 @@
 from flask import Flask, render_template, request, redirect, url_for
 from datetime import datetime
 from models import db, Member, Registration
+from config import Config
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///warrigal_park.db"
+app.config.from_object(Config)
 db.init_app(app)
 
 with app.app_context():
