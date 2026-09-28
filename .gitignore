@@ -1,5 +1,7 @@
-venv/
 __pycache__/
+*.py[cod]
 instance/
-*.pyc
+*.db
 .env
+.venv/
+venv/
