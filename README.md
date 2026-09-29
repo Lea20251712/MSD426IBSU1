@@ -1,3 +1,4 @@
+
 # Warrigal Park Football Club System
 
 Member registration and team roster management system for Warrigal Park Football Club.
@@ -28,7 +29,6 @@ This project uses Git for version control and stores environment-specific values
 ### Deployment configuration
 - `app.py` loads runtime configuration from the `config.py` module.
 - `config.py` centralises app settings such as the database URI and secret key.
-- `.env.example` provides a sample environment definition for local or deployment usage.
 - `Procfile` provides a simple process configuration for deployment platforms that support it.
 
 ### Documentation and change tracking
@@ -52,7 +52,7 @@ https://github.com/RW675/MSD426IBSU1
 
 ## Testing
 Run the test suite with:
-`pytest -q`
+`python -m pytest -q`
 
 ## Notes for assessment submission
 The project includes supporting assignment documentation for configuration management and procurement plan, alongside the application code and version-control evidence required for the assessment.
