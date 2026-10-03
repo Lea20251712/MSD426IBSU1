@@ -1,54 +1,271 @@
-from flask import Flask, render_template, request
 import os
-from datetime import date
-from dotenv import load_dotenv
+from datetime import date, datetime
 
-load_dotenv()
+from flask import Flask, redirect, render_template, request, url_for
 
-app = Flask(__name__, template_folder='app/templates', static_folder='app/static')
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'fallback-key')
+from models import Guardian, Member, Registration, Team, db
 
 
-def calculate_age(dob_string):
-    """Calculate age in years from a YYYY-MM-DD date string."""
-    dob = date.fromisoformat(dob_string)
-    today = date.today()
-    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-    return age
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object("config.Config")
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+        "DATABASE_URL",
+        app.config.get("SQLALCHEMY_DATABASE_URI", "sqlite:///warrigal_park.db"),
+    )
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+    db.init_app(app)
 
-@app.route('/')
-def home():
-    return render_template('index.html')
+    with app.app_context():
+        db.create_all()
 
+    @app.route("/")
+    def home():
+        return "Warrigal Park FC app is running!"
 
-@app.route('/add-member', methods=['GET', 'POST'])
-def add_member():
-    if request.method == 'POST':
-        full_name = request.form.get('full_name')
-        email = request.form.get('email')
-        phone = request.form.get('phone')
-        date_of_birth = request.form.get('date_of_birth')
+    @app.route("/registrations/new", methods=["GET", "POST"])
+    def new_registration():
+        if request.method == "POST":
+            name = request.form.get("member_name", "").strip()
+            dob_str = request.form.get("date_of_birth")
+            season = request.form.get("season", "").strip()
+            age_group = request.form.get("age_group", "").strip()
 
-        guardian_name = request.form.get('guardian_name')
-        guardian_phone = request.form.get('guardian_phone')
-        guardian_relationship = request.form.get('guardian_relationship')
+            try:
+                if not all((name, dob_str, season, age_group)):
+                    raise ValueError
 
-        age = calculate_age(date_of_birth)
-        is_minor = age < 18
+                dob = datetime.strptime(
+                    dob_str,
+                    "%Y-%m-%d",
+                ).date()
 
-        if is_minor:
-            if not guardian_name or not guardian_phone or not guardian_relationship:
-                return "Error: Guardian details (name, phone, relationship) are required for members under 18.", 400
+            except (TypeError, ValueError):
+                return render_template(
+                    "registration_form.html",
+                    error=(
+                        "Please provide a valid name, date of birth, "
+                        "season, and age group."
+                    ),
+                ), 400
+                
+            existing_member = Member.query.filter_by(
+                name=name,
+                date_of_birth=dob,
+            ).first()
 
-        guardian_info = (
-            f" Guardian: {guardian_name} ({guardian_relationship}), {guardian_phone}."
-            if is_minor else ""
+            guardian = None
+
+            if self_is_junior(dob):
+                already_linked = (
+                    existing_member is not None
+                    and existing_member.guardian_id is not None
+                )
+
+                if not already_linked:
+                    guardian_name = request.form.get("guardian_name", "").strip()
+                    guardian_mobile = request.form.get("guardian_mobile", "").strip()
+                    guardian_relationship = request.form.get(
+                        "guardian_relationship", ""
+                    ).strip()
+
+                    if not all((guardian_name, guardian_mobile, guardian_relationship)):
+                        return render_template(
+                            "registration_form.html",
+                            error=(
+                                "Junior registrations require a linked guardian "
+                                "record. Please provide the guardian's name, "
+                                "mobile, and relationship."
+                            ),
+                        ), 400
+
+                    guardian = Guardian(
+                        name=guardian_name,
+                        mobile=guardian_mobile,
+                        relationship=guardian_relationship,
+                    )
+
+            member = existing_member or Member(
+                name=name,
+                date_of_birth=dob,
+            )
+
+            if guardian is not None:
+                db.session.add(guardian)
+                member.guardian = guardian
+
+            registration = Registration(
+                member=member,
+                season=season,
+                age_group=age_group,
+            )
+
+            db.session.add(registration)
+            db.session.commit()
+
+            return redirect(url_for("home"))
+
+        return render_template("registration_form.html")
+
+    @app.route("/registrations/history")
+    def registration_history():
+        members = Member.query.order_by(Member.name.asc()).all()
+
+        selected_member_id = request.args.get("member_id", type=int)
+
+        registrations = []
+
+        if selected_member_id:
+            registrations = (
+                Registration.query
+                .filter_by(member_id=selected_member_id)
+                .order_by(Registration.created_at.desc())
+                .all()
+            )
+
+        return render_template(
+            "registration_history.html",
+            members=members,
+            registrations=registrations,
+            selected_member_id=selected_member_id,
         )
-        return f"Member {full_name} (age {age}) registered successfully!{guardian_info} (Database saving comes in ticket 58)"
 
-    return render_template('add_member.html')
+    @app.route("/guardians/new", methods=["GET", "POST"])
+    def new_guardian():
+        if request.method == "POST":
+            name = request.form.get("guardian_name", "").strip()
+            mobile = request.form.get("mobile", "").strip()
+            email = request.form.get("email", "").strip()
+
+            if not name:
+                return render_template(
+                    "guardian_form.html",
+                    error="Guardian name is required.",
+                ), 400
+
+            guardian = Guardian(name=name, mobile=mobile or None, email=email or None)
+            db.session.add(guardian)
+            db.session.commit()
+
+            return redirect(url_for("home"))
+
+        return render_template("guardian_form.html")
+
+    @app.route("/teams/new", methods=["GET", "POST"])
+    def new_team():
+        if request.method == "POST":
+            name = request.form.get("team_name", "").strip()
+            season = request.form.get("season", "").strip()
+            age_group = request.form.get("age_group", "").strip()
+
+            if not all((name, season, age_group)):
+                return render_template(
+                    "team_form.html",
+                    error="Team name, season, and age group are required.",
+                ), 400
+
+            team = Team(
+                name=name,
+                season=season,
+                age_group=age_group,
+            )
+
+            db.session.add(team)
+            db.session.commit()
+
+            return redirect(url_for("home"))
+
+        return render_template("team_form.html")
+
+    @app.route("/teams/<int:team_id>/players/add", methods=["GET", "POST"])
+    def add_player_to_team(team_id):
+        team = db.session.get(Team, team_id)
+        if team is None:
+            return "Team not found", 404
+
+        registrations = (
+            Registration.query
+            .filter_by(
+                season=team.season,
+                age_group=team.age_group,
+                team_id=None,
+            )
+            .join(Member)
+            .order_by(Member.name.asc())
+            .all()
+        )
+
+        if request.method == "POST":
+            registration_id = request.form.get(
+                "registration_id",
+                type=int,
+            )
+
+            registration = db.session.get(
+                Registration,
+                registration_id,
+            )
+
+            if registration is None:
+                return render_template(
+                    "add_player_to_team.html",
+                    team=team,
+                    registrations=registrations,
+                    error="Please select a valid registered player.",
+                ), 400
+
+            if registration.team_id is not None:
+                return render_template(
+                    "add_player_to_team.html",
+                    team=team,
+                    registrations=registrations,
+                    error="This player is already assigned to a team.",
+                ), 400
+
+            if registration.season != team.season:
+                return render_template(
+                    "add_player_to_team.html",
+                    team=team,
+                    registrations=registrations,
+                    error="The player's registration season does not match the team.",
+                ), 400
+
+            if registration.age_group != team.age_group:
+                return render_template(
+                    "add_player_to_team.html",
+                    team=team,
+                    registrations=registrations,
+                    error="The player's age group does not match the team.",
+                ), 400
+
+            registration.team_id = team.id
+            db.session.commit()
+
+            return redirect(
+                url_for(
+                    "add_player_to_team",
+                    team_id=team.id,
+                )
+            )
+
+        return render_template(
+            "add_player_to_team.html",
+            team=team,
+            registrations=registrations,
+        )
+
+    return app
 
 
-if __name__ == '__main__':
-    app.run(debug=True)
+def self_is_junior(dob):
+    today = date.today()
+    return (today.year - dob.year) - ((today.month, today.day) < (dob.month, dob.day)) < 18
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))
+
