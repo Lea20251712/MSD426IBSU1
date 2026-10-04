@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime
 
 from app import app, db
-from models import Member, Registration, Team
+from models import Guardian, Member, Registration, Team
 
 
 @pytest.fixture
@@ -19,6 +19,12 @@ def client():
 
 
 def test_create_registration_success(client):
+    with app.app_context():
+        guardian = Guardian(name="Test Guardian", mobile="0400 000 000")
+        db.session.add(guardian)
+        db.session.commit()
+        guardian_id = guardian.id
+
     response = client.post(
         "/registrations/new",
         data={
@@ -26,6 +32,7 @@ def test_create_registration_success(client):
             "date_of_birth": "2014-09-03",
             "season": "2026",
             "age_group": "U13",
+            "guardian_id": str(guardian_id),
         },
     )
 
@@ -42,7 +49,6 @@ def test_create_registration_success(client):
         assert registration is not None
         assert registration.season == "2026"
         assert registration.age_group == "U13"
-
 
 def test_create_registration_rejects_missing_date(client):
     response = client.post(

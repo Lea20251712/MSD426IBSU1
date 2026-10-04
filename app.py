@@ -26,30 +26,36 @@ def create_app():
 
     @app.route("/registrations/new", methods=["GET", "POST"])
     def new_registration():
+        def render_form(error=None, status=200):
+            guardians = Guardian.query.order_by(Guardian.name.asc()).all()
+            return render_template(
+                "registration_form.html",
+                error=error,
+                guardians=guardians,
+            ), status
+
         if request.method == "POST":
             name = request.form.get("member_name", "").strip()
             dob_str = request.form.get("date_of_birth")
             season = request.form.get("season", "").strip()
             age_group = request.form.get("age_group", "").strip()
+            guardian_id = request.form.get("guardian_id", type=int)
 
             try:
                 if not all((name, dob_str, season, age_group)):
                     raise ValueError
 
-                dob = datetime.strptime(
-                    dob_str,
-                    "%Y-%m-%d",
-                ).date()
+                dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
 
             except (TypeError, ValueError):
-                return render_template(
-                    "registration_form.html",
+                return render_form(
                     error=(
                         "Please provide a valid name, date of birth, "
                         "season, and age group."
                     ),
-                ), 400
-                
+                    status=400,
+                )
+
             existing_member = Member.query.filter_by(
                 name=name,
                 date_of_birth=dob,
@@ -64,27 +70,26 @@ def create_app():
                 )
 
                 if not already_linked:
-                    guardian_name = request.form.get("guardian_name", "").strip()
-                    guardian_mobile = request.form.get("guardian_mobile", "").strip()
-                    guardian_relationship = request.form.get(
-                        "guardian_relationship", ""
-                    ).strip()
-
-                    if not all((guardian_name, guardian_mobile, guardian_relationship)):
-                        return render_template(
-                            "registration_form.html",
+                    if guardian_id is None:
+                        return render_form(
                             error=(
                                 "Junior registrations require a linked guardian "
-                                "record. Please provide the guardian's name, "
-                                "mobile, and relationship."
+                                "record before the registration can be completed. "
+                                "Please select an existing guardian."
                             ),
-                        ), 400
+                            status=400,
+                        )
 
-                    guardian = Guardian(
-                        name=guardian_name,
-                        mobile=guardian_mobile,
-                        relationship=guardian_relationship,
-                    )
+                    guardian = db.session.get(Guardian, guardian_id)
+
+                    if guardian is None:
+                        return render_form(
+                            error=(
+                                "The selected guardian does not exist. Please "
+                                "select an existing guardian record."
+                            ),
+                            status=400,
+                        )
 
             member = existing_member or Member(
                 name=name,
@@ -92,7 +97,6 @@ def create_app():
             )
 
             if guardian is not None:
-                db.session.add(guardian)
                 member.guardian = guardian
 
             registration = Registration(
@@ -106,7 +110,7 @@ def create_app():
 
             return redirect(url_for("home"))
 
-        return render_template("registration_form.html")
+        return render_form()
 
     @app.route("/registrations/history")
     def registration_history():
